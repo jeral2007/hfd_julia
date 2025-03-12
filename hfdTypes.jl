@@ -25,6 +25,7 @@ struct RatGrid{T} <: Grid{T}
     ts:: Vector{T}
     g::QRPivoted{T, Matrix{T}, Vector{T}, Vector{Int64}}
     ker:: Matrix{T}
+    pots :: Array{T, 3}
 end
 
 struct ExpGrid{T} <: Grid{T}
@@ -34,9 +35,10 @@ struct ExpGrid{T} <: Grid{T}
     ts:: Vector{T}
     g::QRPivoted{T, Matrix{T}, Vector{T}, Vector{Int64}}
     ker:: Matrix{T}
+    pots :: Array{T, 3}
 end
 "constructs legendre rational functions grid"
-function leg_rat_grid(N, k=2e2, rcut=Inf)
+function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
     as, gs = PolyNodes.alphas_leg(N), PolyNodes.gammas_leg(N)
     ts, ws = PolyNodes.nodes(as, gs, 2e0) 
     if rcut != Inf
@@ -50,10 +52,14 @@ function leg_rat_grid(N, k=2e2, rcut=Inf)
     xs, wxs = PolyNodes.caley_trans((ts, ws), k)
     dmat .*= (1 .-ts).^2 ./(2*k)
     dmat2 = dmat*dmat
-    RatGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2))
+    pots = zeros(N, N, kmax+1)
+    for kk=1:kmax+1
+        @views pots[:, :, kk] .= potk_mat(xs, wxs, dmat, kk-1)
+    end
+    RatGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2), pots)
 end
 "constructs exponential grid"
-function leg_exp_grid(N, x1)
+function leg_exp_grid(N, x1, kmax=23)
     as, gs = PolyNodes.alphas_leg(N), PolyNodes.gammas_leg(N)
     ts, ws = PolyNodes.nodes(as, gs, 2e0)
     ct = log(x1-1)/(ts[end]+1)
@@ -63,7 +69,11 @@ function leg_exp_grid(N, x1)
     dmat = PolyNodes.diffOp(ts)
     @views dmat ./= dxs
     dmat2 = dmat*dmat
-    ExpGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2))
+    pots = zeros(N, N, kmax+1)
+    for kk=1:kmax+1
+        @views pots[:, :, kk] .= potk_mat(xs, wxs, dmat, kk-1)
+    end
+    ExpGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2), pots)
 end    
 
 mutable struct ShellBlock{T}
@@ -133,4 +143,21 @@ function project(exp_grid::ExpGrid, grid, func)
    res
 end
 
+pois_op(xs, dmat, k) = xs.^2 .* (dmat*dmat) .+ 2e0.* xs .* dmat .- k*(k+1)
+function potk_mat(xs, ws, dmat,  k::Integer)
+    mat = -pinv(pois_op(xs, dmat, k)) #solve equation
+    if k>0
+        return mat
+    end
+    # employ boundary conditions
+    for jj=1:length(xs)
+        for ii=1:length(xs)
+            mat[ii, jj] -= mat[end, jj]
+        end
+    end
+    for kk=1:length(xs)
+        @views mat[:, kk] .+= ws[kk]/xs[end]
+    end
+    mat
+end
 end

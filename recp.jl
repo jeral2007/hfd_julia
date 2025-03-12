@@ -61,6 +61,7 @@ struct ECPnum
     lblocks
     soblocks
 end
+
 ECPnum((N, lbs, sbs)) = ECPnum(N, lbs, sbs)
 function (ecp::ECPnum)(cpars, grid, kappa)
     l = abs(kappa)+sign(kappa)
@@ -78,4 +79,16 @@ function (ecp::ECPnum)(cpars, grid, kappa)
     res
 end
 
+struct GRECPadd
+   ks
+   funcs
+   lblocks
+end
+
+function (grecp::GRECPadd)(cpars, grid, kappa)
+    j = abs(kappa)-1/2
+    l = Int(j + sign(kappa)/2)
+    res = zeros(eltype(grid), length(grid.xs), length(grid.xs))
+    ind = findfirst(grecp.ks .== kappa)
+end    
 end

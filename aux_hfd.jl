@@ -127,24 +127,36 @@ end
 - grid -- grid nodes and weights packed to _Grid_ struct
 - occ_block -- data of occupied states packed to _ShellBlock_ struct
 """
+#function coul_pot(cpars::CalcParams{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
+#    res = zeros(T, cpars.N)
+#    an = cpars.alpha*cpars.Z
+#    @inbounds for ii=1:length(occ_block.ks)
+#            res .+= occ_block.occs[ii].*coul(cpars, grid, occ_block.ks[ii],
+#                                                                      occ_block.vecs[:, ii])./cpars.Z
+#    end
+#    diagm([res; an^2 .* res])
+#end
 function coul_pot(cpars::CalcParams{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
     res = zeros(T, cpars.N)
     an = cpars.alpha*cpars.Z
-    @inbounds for ii=1:length(occ_block.ks)
-            res .+= occ_block.occs[ii].*coul(cpars, grid, occ_block.ks[ii],
-                                                                      occ_block.vecs[:, ii])./cpars.Z
+    dens = zeros(T, cpars.N)
+    pqs = reshape(occ_block.vecs, :, 2, length(occ_block.ks))
+    @views for ii=1:length(occ_block.ks)
+        γ = sqrt(occ_block.ks[ii]^2-an^2)
+        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii].*grid.xs.^(2γ)./cpars.Z
     end
+    res = grid.xs .* (grid.pots[:, :, 1] * dens)
     diagm([res; an^2 .* res])
 end
 
 """saves hamiltonian and right hand part of dirac eq to preallocated buffers"""
 function lhs_rhs!(cpars, grid::Grid, kappa::Int, occ_block::ShellBlock, lhs, rhs; ecp=nothing, pot_func)
-    ecp_vals = zeros(eltype(grid.xs), cpars.N*2)
     dirac_h1!(cpars, grid, kappa, lhs, rhs)
     @views lhs .+= pot_func(cpars, grid, occ_block, kappa)
     if ecp != nothing
-        ecp_vals[1:cpars.N] .= ecp(cpars, grid, kappa)
-        ecp_vals[cpars.N+1:end] .= (cpars.alpha*cpars.Z).^2 .* ecp_vals[1:cpars.N]
+        ecp_vals = zeros(eltype(grid.xs), cpars.N*2)
+        @views ecp_vals[1:cpars.N] .= ecp(cpars, grid, kappa)
+        @views ecp_vals[cpars.N+1:end] .= (cpars.alpha*cpars.Z).^2 .* ecp_vals[1:cpars.N]
         @views lhs .+= diagm(ecp_vals) 
     end
     lhs, rhs
@@ -284,7 +296,7 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     gam2 = sqrt(k2^2-an^2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ
+        fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
         if grid.xs[ii]>eps(eltype(grid.xs))
             fact*=grid.xs[ii]^(gam2-gam1)
         else
@@ -297,16 +309,16 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
             end
             pk = Int(kj/2)
             fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
-            res[ii, jj] += fact*fact2*pq[ii]*pq[jj] #big component
-            res[cpars.N+ii, cpars.N+jj] +=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N] # small component
+            res[ii, jj] -= fact*fact2*pq[ii]*pq[jj]*grid.xs[ii] #big component
+            res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N]*grid.xs[ii] # small component
         end
     end
 end
 
 """exchange part of electron interaction"""
-function exc_pot(cpars, grid, occ_block, kappa)
+function exc_pot!(cpars, grid, occ_block, kappa, res)
     κ_vals = sort(unique(occ_block.ks))
-    res = zeros(eltype(grid.xs), 2*cpars.N, 2*cpars.N)
+   # res = zeros(eltype(grid.xs), 2*cpars.N, 2*cpars.N)
     for k2 in κ_vals
         f_inds = findall(k2 .== occ_block.ks)
         for fi in f_inds
@@ -314,17 +326,17 @@ function exc_pot(cpars, grid, occ_block, kappa)
                       occ_block.vecs[:, fi], occ_block.occs[fi], res)
         end
     end
-    res ./= cpars.Z
-    for ii=1:cpars.N
-        res[ii,1:cpars.N] .*=grid.xs[ii]
-        res[cpars.N+ii,cpars.N+1:end] .*=grid.xs[ii]
-    end
+    #@views res ./= cpars.Z
+    #@views for ii=1:cpars.N
+    #    res[ii,1:cpars.N] .*=grid.xs[ii]
+    #    res[cpars.N+ii,cpars.N+1:end] .*=grid.xs[ii]
+    #end
     res
 end
 
 function hfd_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
-    res .-= exc_pot(cpars, grid, occ_block, kappa)
+    exc_pot!(cpars, grid, occ_block, kappa, res)
     res
 end
 

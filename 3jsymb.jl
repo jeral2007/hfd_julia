@@ -31,7 +31,8 @@ function gam2s(j1, j2, k)
     if !(jg-jl<=k<=jg+jl) 
         return 0e0
     end
-    ii = 1
+    ii = 1; ki = div((j1-1)^2, 2) + (j2-1) + div(k-j1+j2, 2) + 1
+    return GamCoefs[ki]
     for jt1=1:2:21
         for jt2=1:2:jt1
             for kt = jt1-jt2:2:jt1+jt2
