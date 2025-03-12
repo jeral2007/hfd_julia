@@ -23,9 +23,9 @@ struct RatGrid{T} <: Grid{T}
     ws:: Vector{T}
     dmat :: Matrix{T}
     ts:: Vector{T}
-    g::QRPivoted{T, Matrix{T}, Vector{T}, Vector{Int64}}
+    g:: Matrix{T}
     ker:: Matrix{T}
-    pots :: Array{T, 3}
+    pot :: Matrix{T}
 end
 
 struct ExpGrid{T} <: Grid{T}
@@ -33,9 +33,9 @@ struct ExpGrid{T} <: Grid{T}
     ws:: Vector{T}
     dmat :: Matrix{T}
     ts:: Vector{T}
-    g::QRPivoted{T, Matrix{T}, Vector{T}, Vector{Int64}}
+    g:: Matrix{T}
     ker:: Matrix{T}
-    pots :: Array{T, 3}
+    pot :: Matrix{T}
 end
 "constructs legendre rational functions grid"
 function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
@@ -56,7 +56,7 @@ function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
     for kk=1:kmax+1
         @views pots[:, :, kk] .= potk_mat(xs, wxs, dmat, kk-1)
     end
-    RatGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2), pots)
+    RatGrid(xs, wxs, dmat, ts, derinv_mat(xs, wxs, ts, dmat) , nullspace(dmat2), pots[:, :, 1])
 end
 "constructs exponential grid"
 function leg_exp_grid(N, x1, kmax=23)
@@ -73,7 +73,7 @@ function leg_exp_grid(N, x1, kmax=23)
     for kk=1:kmax+1
         @views pots[:, :, kk] .= potk_mat(xs, wxs, dmat, kk-1)
     end
-    ExpGrid(xs, wxs, dmat, ts, qr(dmat2,ColumnNorm()), nullspace(dmat2), pots)
+    ExpGrid(xs, wxs, dmat, ts, derinv_mat(xs, wxs, ts, dmat), nullspace(dmat2), pots[:, :, 1])
 end    
 
 mutable struct ShellBlock{T}
@@ -143,21 +143,35 @@ function project(exp_grid::ExpGrid, grid, func)
    res
 end
 
-pois_op(xs, dmat, k) = xs.^2 .* (dmat*dmat) .+ 2e0.* xs .* dmat .- k*(k+1)
+pois_op(xs, dmat, k) = xs.^2 .* (dmat*dmat) .+ 2e0.* xs .* dmat .- (k*(k+1) .* diagm(ones(eltype(xs), length(xs))))
 function potk_mat(xs, ws, dmat,  k::Integer)
     mat = -pinv(pois_op(xs, dmat, k)) #solve equation
+    aux = zeros(eltype(mat), size(mat))
+    aux[:, end] .=-one(eltype(mat))
     if k>0
         return mat
     end
     # employ boundary conditions
-    for jj=1:length(xs)
-        for ii=1:length(xs)
-            mat[ii, jj] -= mat[end, jj]
-        end
-    end
-    for kk=1:length(xs)
-        @views mat[:, kk] .+= ws[kk]/xs[end]
+    mat = ((I + aux) * mat)
+    for ii=1:length(xs)
+       @views mat[ii, :] += 1e0/xs[end] .* ws
     end
     mat
+end
+function derinv_mat(xs, ws, ts, dmat)
+    N = length(xs)
+    aux = similar(dmat)
+    res = pinv(dmat)
+    for kk=1:N
+        fact = 1e0
+        for jj=1:N
+            if jj==kk
+                continue
+            end
+            fact *=(-1-ts[jj])/(ts[kk]-ts[jj])
+        end
+        aux[:, kk] .= fact
+    end
+    (I - aux)*res
 end
 end

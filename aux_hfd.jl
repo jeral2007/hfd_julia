@@ -145,7 +145,7 @@ function coul_pot(cpars::CalcParams{T}, grid::Grid{T}, occ_block::ShellBlock{T},
         γ = sqrt(occ_block.ks[ii]^2-an^2)
         dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii].*grid.xs.^(2γ)./cpars.Z
     end
-    res = grid.xs .* (grid.pots[:, :, 1] * dens)
+    res = grid.xs .* (grid.pot * dens)
     diagm([res; an^2 .* res])
 end
 
@@ -296,7 +296,8 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     gam2 = sqrt(k2^2-an^2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
+        #fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
+        fact = grid.xs[jj]^(gam1+gam2)*grid.pot[ii, jj]*occ/cpars.Z
         if grid.xs[ii]>eps(eltype(grid.xs))
             fact*=grid.xs[ii]^(gam2-gam1)
         else
@@ -308,7 +309,8 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
                 continue
             end
             pk = Int(kj/2)
-            fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
+            #fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
+            fact2 = symb3j0.gam2s(j1, j2, kj)*(rl/rg)^pk
             res[ii, jj] -= fact*fact2*pq[ii]*pq[jj]*grid.xs[ii] #big component
             res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N]*grid.xs[ii] # small component
         end
