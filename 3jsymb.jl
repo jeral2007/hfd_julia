@@ -1,11 +1,18 @@
 module symb3j0
-using SpecialFunctions
+#using SpecialFunctions
 """squared 3j symbol for integer arguments
       l1  l2  l3 
     (           )^2
       0    0   0 
 """
 function sym3j2(l1, l2, l3)
+    function logfactorial(n::Integer) 
+        res = 0e0
+        for kk=1:n
+            res += log(kk)
+        end
+        res
+    end
     J = l1 + l2 + l3
     if J % 2 != 0  || l3>l1+l2  || l2>l1+l3 || l1>l2+l3
         return 0e0
