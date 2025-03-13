@@ -1,14 +1,15 @@
 module HfdTypes
 using LinearAlgebra
 include("polynodes.jl")
-export CalcParams, Grid, leg_rat_grid, ShellBlock, from_dict, leg_exp_grid, project
-
+export CalcParams, Grid, leg_rat_grid, ShellBlock, from_dict, leg_exp_grid, project, CalcParamsExpNuc
+export Params
 """struct to store calculation parameters
 - Z::Real -- nuclear charge
 - N::Int -- number of points of grid
 - alpha::Real -- fine structure constant value (reciprocal to speed of light in atomic units)
 """
-struct CalcParams{T}
+abstract type Params{T} end
+struct CalcParams{T} <: Params{T}
     Z :: T
     N :: Int64
     alpha :: T
@@ -16,6 +17,20 @@ end
 
 CalcParams(Z::T, N::Int64) where {T} = CalcParams{T}(Z, N, 0.0072973525643) # α value from wiki
 
+"""struct to store calculation parameters
+- Z::Real -- nuclear charge
+- N::Int -- number of points of grid
+- alpha::Real -- fine structure constant value (reciprocal to speed of light in atomic units)
+- rnuc:: Real -- nuclear radii a.u, charge distributed as (1-exp(r/rnuc))
+"""
+struct CalcParamsExpNuc{T} <: Params{T}
+    Z::T
+    N::Int64
+    rnuc::T
+    alpha::T
+end
+CalcParamsExpNuc(Z::T, N::Int64) where {T} = CalcParamsExpNuc{T}(Z, N, 5e-5, 0.0072973525643) # α value from wiki
+CalcParamsExpNuc(Z::T, N::Int64, rnuc::T) where {T} = CalcParamsExpNuc{T}(Z, N, rnuc, 0.0072973525643) # α value from wiki
 abstract type Grid{T} end
 
 struct RatGrid{T} <: Grid{T}
@@ -24,6 +39,7 @@ struct RatGrid{T} <: Grid{T}
     dmat :: Matrix{T}
     ts:: Vector{T}
     g:: Matrix{T}
+    gl::Matrix{T}
     ker:: Matrix{T}
     pot :: Matrix{T}
 end
@@ -38,7 +54,7 @@ struct ExpGrid{T} <: Grid{T}
     pot :: Matrix{T}
 end
 "constructs legendre rational functions grid"
-function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
+function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=0)
     as, gs = PolyNodes.alphas_leg(N), PolyNodes.gammas_leg(N)
     ts, ws = PolyNodes.nodes(as, gs, 2e0) 
     if rcut != Inf
@@ -56,7 +72,9 @@ function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
     for kk=1:kmax+1
         @views pots[:, :, kk] .= potk_mat(xs, wxs, dmat, kk-1)
     end
-    RatGrid(xs, wxs, dmat, ts, derinv_mat(xs, wxs, ts, dmat) , nullspace(dmat2), pots[:, :, 1])
+    RatGrid(xs, wxs, dmat, ts, derinv_mat(xs, wxs, ts, dmat),  
+            derinv_mat(Right(), xs, wxs, ts, dmat), 
+            nullspace(dmat2), pots[:, :, 1])
 end
 "constructs exponential grid"
 function leg_exp_grid(N, x1, kmax=23)
@@ -158,7 +176,12 @@ function potk_mat(xs, ws, dmat,  k::Integer)
     end
     mat
 end
-function derinv_mat(xs, ws, ts, dmat)
+
+abstract type LeftRight end
+struct Left <:LeftRight end
+struct Right <:LeftRight end
+
+function derinv_mat(::T, xs, ws, ts, dmat) where {T<:LeftRight}
     N = length(xs)
     aux = similar(dmat)
     res = pinv(dmat)
@@ -168,10 +191,19 @@ function derinv_mat(xs, ws, ts, dmat)
             if jj==kk
                 continue
             end
-            fact *=(-1-ts[jj])/(ts[kk]-ts[jj])
+            if T == Left
+                fact *=(-1-ts[jj])/(ts[kk]-ts[jj])
+            else
+                fact *=(1-ts[jj])/(ts[kk] - ts[jj])
+            end
         end
         aux[:, kk] .= fact
     end
-    (I - aux)*res
+    if T == Left
+        return (I - aux)*res
+    else
+        return  -(I - aux)*res
+    end
 end
+derinv_mat(xs, ws, ts, dmat) = derinv_mat(Left(), xs, ws, ts, dmat)
 end

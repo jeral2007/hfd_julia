@@ -34,7 +34,20 @@ function dirac_h1(cpars, grid, kappa)
     (lhs, rhs)
 end
 
-function dirac_h1!(cpars, grid, kappa, lhs, rhs)
+struct PointNuclear end
+dirac_h1!(cpars, grid, kappa, lhs, rhs) = dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
+function dirac_h1!(cpars::CalcParamsExpNuc, grid, kappa, lhs, rhs)
+    dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
+    an = cpars.alpha*cpars.Z
+    gamma = sqrt(kappa^2- an^2)
+    N = length(grid.xs)
+    for kk=1:N
+        lhs[kk, kk] += exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
+        lhs[N+kk, N+kk] += an^2 *exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
+    end
+end
+
+function dirac_h1!(::PointNuclear, cpars, grid, kappa, lhs, rhs)
     an = cpars.alpha*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     N = length(grid.xs)
@@ -136,7 +149,7 @@ end
 #    end
 #    diagm([res; an^2 .* res])
 #end
-function coul_pot(cpars::CalcParams{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
+function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
     res = zeros(T, cpars.N)
     an = cpars.alpha*cpars.Z
     dens = zeros(T, cpars.N)
@@ -179,7 +192,7 @@ is the number of radial grid nodes.
 - caption -- header to print at start of iterations
 occ_block is updated as result of calculation
 """    
-function calc_occ!(cpars::CalcParams{T}, grid::Grid{T}, 
+function calc_occ!(cpars::Params{T}, grid::Grid{T}, 
     occ_block::ShellBlock{T}; pot_func, 
     maxiter=50, tol::T = 1e-6, dump::T = 0.5, caption, ecp=nothing, aitken=false, active = nothing) where {T}
     κs = sort(unique(occ_block.ks))
@@ -296,8 +309,8 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     gam2 = sqrt(k2^2-an^2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        #fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
-        fact = grid.xs[jj]^(gam1+gam2)*grid.pot[ii, jj]*occ/cpars.Z
+        fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
+        #fact = grid.xs[jj]^(gam1+gam2)*grid.pot[ii, jj]*occ/cpars.Z
         if grid.xs[ii]>eps(eltype(grid.xs))
             fact*=grid.xs[ii]^(gam2-gam1)
         else
@@ -309,8 +322,15 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
                 continue
             end
             pk = Int(kj/2)
-            #fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
-            fact2 = symb3j0.gam2s(j1, j2, kj)*(rl/rg)^pk
+            fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
+            if pk == 0 # to ensure exact cancelation of coulumb and exchange for same state
+                tmp = grid.pot[ii, jj] * grid.xs[jj]^(2gam1)*grid.xs[ii]*occ/cpars.Z
+                tmp *= symb3j0.gam2s(j1, j2, kj)
+                res[ii, jj] -= tmp*pq[ii]*pq[jj]
+                res[cpars.N+ii, cpars.N+jj] -= tmp*pq[cpars.N+ii]*pq[cpars.N+jj]
+                continue
+            end
+            #fact2 = symb3j0.gam2s(j1, j2, kj)*(rl/rg)^pk
             res[ii, jj] -= fact*fact2*pq[ii]*pq[jj]*grid.xs[ii] #big component
             res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N]*grid.xs[ii] # small component
         end
