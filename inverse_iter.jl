@@ -2,13 +2,13 @@ module RadInts
 include("3jsymb.jl")
 """evaluates radial integral of dens * r<^k/r^k+1. modifies density
 result is multiplied by r"""
-function radint!(cpars, grid, dens, k, res; pots, j1=nothing, j2= nothing)
+function radint!(cpars, grid, dens, k, res; green_funcs, j1=nothing, j2= nothing)
     if j1 != nothing
         fact2=symb3j0.gam2s(j1, j2, 2k)
     else
         fact2 = 1e0
     end
-    @views res .= (pots[:, :, k+1] * dens) .*grid.xs .* (fact2 / cpars.Z)
+    @views res .= (green_funcs[:, :, k+1] * dens) .*grid.xs .* (fact2 / cpars.Z)
     res
 end
   
@@ -22,7 +22,7 @@ function add_dens!(cpars, grid, st1, st2, kappa1, kappa2, occ, res)
                   grid.xs .^ (gam1+gam2)).* occ
 end
 
-function twoelint!(cpars, grid, st, kappa1, occ_block, res; cpot, pots)
+function twoelint!(cpars, grid, st, kappa1, occ_block, res; cpot, green_funcs=green_funcs)
     an2  = (cpars.alpha^2*cpars.Z^2) #kukuruznik
     lj(κ) = abs(κ) - Int((-sign(κ)+1)/2), 2*abs(κ)-1
     resPQ = reshape(res, :, 2)
@@ -49,7 +49,7 @@ function twoelint!(cpars, grid, st, kappa1, occ_block, res; cpot, pots)
                 if (l1+l2+Int(kj/2)) % 2 !=0
                     continue
                 end
-                radint!(cpars, grid, dens, Int(kj/2), excpot; pots, j1=j1, j2=j2)
+                radint!(cpars, grid, dens, Int(kj/2), excpot; green_funcs=green_funcs, j1=j1, j2=j2)
             end
             excpot .*= grid.xs.^(γ2-γ1)
             resPQ[:, 1] .-= excpot .* pqs_occ[:, 1, f_i]
@@ -58,7 +58,7 @@ function twoelint!(cpars, grid, st, kappa1, occ_block, res; cpot, pots)
     end
 end
 
-function coulpot_func(cpars, grid, occ_block; pots)
+function coulpot_func(cpars, grid, occ_block; green_funcs)
     dens = zeros(eltype(grid.xs), cpars.N)
     res = zeros(eltype(grid.xs), cpars.N)
     for f_i=1:length(occ_block.ks)
@@ -66,6 +66,6 @@ function coulpot_func(cpars, grid, occ_block; pots)
                          occ_block.ks[f_i], occ_block.ks[f_i],
                          occ_block.occs[f_i], dens)
     end
-    radint!(cpars, grid, dens, 0, res; pots)
+    radint!(cpars, grid, dens, 0, res; green_funcs = green_funcs)
 end
 end

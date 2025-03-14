@@ -2,7 +2,7 @@ module HfdTypes
 using LinearAlgebra
 include("polynodes.jl")
 export CalcParams, Grid, leg_rat_grid, ShellBlock, from_dict, leg_exp_grid, project, CalcParamsExpNuc
-export Params
+export Params, δnuc
 """struct to store calculation parameters
 - Z::Real -- nuclear charge
 - N::Int -- number of points of grid
@@ -31,8 +31,9 @@ struct CalcParamsExpNuc{T} <: Params{T}
 end
 CalcParamsExpNuc(Z::T, N::Int64) where {T} = CalcParamsExpNuc{T}(Z, N, 5e-5, 0.0072973525643) # α value from wiki
 CalcParamsExpNuc(Z::T, N::Int64, rnuc::T) where {T} = CalcParamsExpNuc{T}(Z, N, rnuc, 0.0072973525643) # α value from wiki
-abstract type Grid{T} end
 
+
+abstract type Grid{T} end
 struct RatGrid{T} <: Grid{T}
     xs:: Vector{T}
     ws:: Vector{T}
@@ -207,4 +208,16 @@ function derinv_mat(::T, xs, ws, ts, dmat) where {T<:LeftRight}
     end
 end
 derinv_mat(xs, ws, ts, dmat) = derinv_mat(Left(), xs, ws, ts, dmat)
+
+"""nuclei potential correction on _grid_; total potential U(r) = -Z/r(1 + δnuc(r))"""
+δnuc(cpars, grid) = zeros(eltype(grid.xs), length(grid.xs))
+function δnuc(cpars::CalcParamsExpNuc, grid) 
+    cn = 1e0/cpars.Z/cpars.rnuc
+    res = zeros(eltype(grid.xs), cpars.N)
+    for ii=1:cpars.N
+        ux= cn * grid.xs[ii]
+        res[ii] = -exp(-ux)*(1 - ux/2)
+    end
+    res
+end
 end

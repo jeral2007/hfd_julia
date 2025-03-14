@@ -20,10 +20,11 @@ function dirac_h1(cpars, grid, kappa)
     an = cpars.alpha*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     eye = diagm(ones(length(grid.xs)))
+    coul = -eye .+ diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
-    lhsPP = -eye
+    lhsPP = +coul
     lhsPQ = (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ = -2 .* xmat .- eye.*an^2
+    lhsQQ = -2 .* xmat .+ coul.*an^2
     lhsQP = -(gamma+kappa) .* eye .- xmat*grid.dmat
     lhs = [lhsPP lhsPQ;
            lhsQP lhsQQ]
@@ -34,33 +35,21 @@ function dirac_h1(cpars, grid, kappa)
     (lhs, rhs)
 end
 
-struct PointNuclear end
-dirac_h1!(cpars, grid, kappa, lhs, rhs) = dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
-function dirac_h1!(cpars::CalcParamsExpNuc, grid, kappa, lhs, rhs)
-    dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
-    an = cpars.alpha*cpars.Z
-    gamma = sqrt(kappa^2- an^2)
-    N = length(grid.xs)
-    for kk=1:N
-        lhs[kk, kk] += exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
-        lhs[N+kk, N+kk] += an^2 *exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
-    end
-end
-
-function dirac_h1!(::PointNuclear, cpars, grid, kappa, lhs, rhs)
+function dirac_h1!(cpars, grid, kappa, lhs, rhs)
     an = cpars.alpha*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     N = length(grid.xs)
     eye = diagm(ones(eltype(grid.xs), N))
+    coul = -eye .+ diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
     @views begin
     lhsPP = lhs[1:N, 1:N]
     lhsPQ = lhs[1:N, N+1:end]
     lhsQP = lhs[N+1:end,1:N]
     lhsQQ = lhs[N+1:end, N+1:end]
-    lhsPP .= -eye
+    lhsPP .= coul
     lhsPQ .= (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ .= -2 .* xmat .- eye.*an^2
+    lhsQQ .= -2 .* xmat .+ coul.*an^2
     lhsQP .= -(gamma+kappa) .* eye .- xmat*grid.dmat
     end
     for kk=1:N
