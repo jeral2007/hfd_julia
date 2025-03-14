@@ -176,6 +176,7 @@ function potk_mat(xs, ws, dmat,  k::Integer)
     end
     mat
 end
+potk_mat(grid::Grid, k) = potk_mat(grid.xs, grid.ws, grid.dmat, k) 
 
 abstract type LeftRight end
 struct Left <:LeftRight end
