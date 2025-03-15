@@ -20,11 +20,10 @@ function dirac_h1(cpars, grid, kappa)
     an = cpars.alpha*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     eye = diagm(ones(length(grid.xs)))
-    coul = -eye .+ diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
-    lhsPP = +coul
+    lhsPP = -eye
     lhsPQ = (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ = -2 .* xmat .+ coul.*an^2
+    lhsQQ = -2 .* xmat .- eye.*an^2
     lhsQP = -(gamma+kappa) .* eye .- xmat*grid.dmat
     lhs = [lhsPP lhsPQ;
            lhsQP lhsQQ]
@@ -35,21 +34,33 @@ function dirac_h1(cpars, grid, kappa)
     (lhs, rhs)
 end
 
-function dirac_h1!(cpars, grid, kappa, lhs, rhs)
+struct PointNuclear end
+dirac_h1!(cpars, grid, kappa, lhs, rhs) = dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
+function dirac_h1!(cpars::CalcParamsExpNuc, grid, kappa, lhs, rhs)
+    dirac_h1!(PointNuclear(), cpars, grid, kappa, lhs, rhs)
+    an = cpars.alpha*cpars.Z
+    gamma = sqrt(kappa^2- an^2)
+    N = length(grid.xs)
+    for kk=1:N
+        lhs[kk, kk] += exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
+        lhs[N+kk, N+kk] += an^2 *exp(-grid.xs[kk]/cpars.rnuc/cpars.Z)
+    end
+end
+
+function dirac_h1!(::PointNuclear, cpars, grid, kappa, lhs, rhs)
     an = cpars.alpha*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     N = length(grid.xs)
     eye = diagm(ones(eltype(grid.xs), N))
-    coul = -eye .+ diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
     @views begin
     lhsPP = lhs[1:N, 1:N]
     lhsPQ = lhs[1:N, N+1:end]
     lhsQP = lhs[N+1:end,1:N]
     lhsQQ = lhs[N+1:end, N+1:end]
-    lhsPP .= coul
+    lhsPP .= -eye
     lhsPQ .= (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ .= -2 .* xmat .+ coul.*an^2
+    lhsQQ .= -2 .* xmat .- eye.*an^2
     lhsQP .= -(gamma+kappa) .* eye .- xmat*grid.dmat
     end
     for kk=1:N
@@ -288,7 +299,16 @@ sc_coul_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid, occ_block
                                                           caption="scaled (Z-1/Z) coulumb interaction", 
                                                           pot_func=sc_coul,
                                                           kws...)
-
+"""auxilary function to evaluate exchange matrix. 
+Arguments:
+- cpars::Params, grid::Grid -- Parameters of Calculation and grid.
+- k1::Int -- κ value for Hamiltonian Hκ
+- k2::Int -- κ value of electronic state 
+- pq::Vector -- values of big and scaled small component of electronic state on grid.
+- occ::Float -- occupation number  of shell of state
+- res::Matrix -- at the end of exc_func! evaluation, exchange part
+corresponding to interaction with state pq 
+will be added to res"""
 function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     lj(κ) = abs(κ) - Int((-sign(κ)+1)/2), 2*abs(κ)-1
     l1, j1 = lj(k1)
@@ -344,17 +364,43 @@ function exc_pot!(cpars, grid, occ_block, kappa, res)
     #end
     res
 end
-
+"""Hartree Fock mean field matrix of occupied shells in occ_block. Result for κ part of Hamiltonian"""
 function hfd_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     exc_pot!(cpars, grid, occ_block, kappa, res)
     res
 end
 
+"Hartree mean field + exchange with occupied shells with same κ (dominant exchange part, almost slater hole"
+function hded_pot(cpars, grid, occ_block, kappa)
+    res = coul_pot(cpars, grid, occ_block, kappa)
+    an2 = (cpars.alpha*cpars.Z) #kukuruznik
+    γ = sqrt(kappa^2-an2)
+    for f_i=1:length(occ_block.ks)
+        if (occ_block.ks[f_i] != kappa)
+            continue
+        end
+        for jj=1:cpars.N, ii=1:cpars.N
+            fact = occ_block.occs[f_i]/(2abs(occ_block.ks[f_i]))/cpars.Z * grid.pot[ii, jj]*grid.xs[ii]
+            fact *= grid.xs[jj]^(2γ)
+            res[ii, jj] -= fact*occ_block.vecs[ii, f_i] * occ_block.vecs[jj, f_i]
+            res[ii+cpars.N, jj+cpars.N] -= fact*occ_block.vecs[ii+cpars.N, f_i] * occ_block.vecs[jj+cpars.N, f_i]*an2
+        end
+    end
+    res
+end
+            
 hfd_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid, occ_block; 
                                                           caption="Dirac Hartree Fock", 
                                                           pot_func=hfd_pot,
                                                           kws...)
+
+hded_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid,occ_block;
+                                                      caption="Dirac Hartree + dominant exchange part",
+                                                      pot_func=hded_pot,
+                                                      kws...)
+
+
 include("refine_occ.jl")
 end
 
