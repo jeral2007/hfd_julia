@@ -349,7 +349,9 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
             fact2=symb3j0.gam2s(j1, j2, kj)*grid.pots[ii, jj, pk+1]
             #fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
             res[ii, jj] -= fact*fact2*pq[ii]*pq[jj] #big component
-            res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N] # small component
+            res[ii, jj+cpars.N] -= fact*fact2*pq[ii]*pq[jj+cpars.N]*an^2 #big component
+            res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^4*pq[ii+cpars.N]*pq[jj+cpars.N] # small component
+            res[cpars.N+ii, jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj] # small component
         end
     end
 end
@@ -376,7 +378,7 @@ end
 "Hartree mean field + exchange with occupied shells with same κ (dominant exchange part, almost slater hole)"
 function hded_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
-    an2 = (cpars.alpha*cpars.Z)^2 #kukuruznik
+    an = (cpars.alpha*cpars.Z)
     γ = sqrt(kappa^2-an2)
     for f_i=1:length(occ_block.ks)
         if (occ_block.ks[f_i] != kappa)
@@ -386,7 +388,9 @@ function hded_pot(cpars, grid, occ_block, kappa)
             fact = occ_block.occs[f_i]/(2abs(occ_block.ks[f_i])) * grid.pot[ii, jj]*grid.xs[ii]*cpars.scale
             fact *= grid.xs[jj]^(2γ)
             res[ii, jj] -= fact*occ_block.vecs[ii, f_i] * occ_block.vecs[jj, f_i]
-            res[ii+cpars.N, jj+cpars.N] -= fact*occ_block.vecs[ii+cpars.N, f_i] * occ_block.vecs[jj+cpars.N, f_i]*an2
+            res[ii, jj+ cpars.N] -= fact*occ_block.vecs[ii, f_i] * occ_block.vecs[jj+cpars.N, f_i]*an^2
+            res[ii+cpars.N, jj] -= fact*occ_block.vecs[ii+cpars.N, f_i] * occ_block.vecs[jj, f_i]*an^2
+            res[ii+cpars.N, jj+cpars.N] -= fact*occ_block.vecs[ii+cpars.N, f_i] * occ_block.vecs[jj+cpars.N, f_i]*an^4
         end
     end
     res
