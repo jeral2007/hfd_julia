@@ -8,7 +8,7 @@ function radint!(cpars, grid, dens, k, res; green_funcs, j1=nothing, j2= nothing
     else
         fact2 = 1e0
     end
-    @views res .= (green_funcs[:, :, k+1] * dens) .*grid.xs .* (fact2 / cpars.Z)
+    @views res .= (green_funcs[:, :, k+1] * dens) .*grid.xs .* fact2  
     res
 end
   
