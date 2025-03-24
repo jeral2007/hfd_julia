@@ -167,7 +167,7 @@ end
 
 pois_op(xs, dmat, k) = xs.^2 .* (dmat*dmat) .+ 2e0.* xs .* dmat .- (k*(k+1) .* diagm(ones(eltype(xs), length(xs))))
 function potk_mat(xs, ws, dmat,  k::Integer)
-    mat = -pinv(pois_op(xs, dmat, k)) #solve equation
+    mat = -pinv(pois_op(xs, dmat, k)).*(2k+1) #solve equation
     aux = zeros(eltype(mat), size(mat))
     aux[:, end] .=-one(eltype(mat))
     if k>0
