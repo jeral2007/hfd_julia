@@ -9,15 +9,23 @@ function moments(cpars, grid, occ_block, maxpow=2)
         for ki=1:length(occ_block.ks)
             gam = sqrt(occ_block.ks[ki]^2-an^2)
             pq = reshape(occ_block.vecs[:, ki], :, 2)
-            res[ki, pow+1] = dot(aux, grid.xs .^ (2gam) .*(pq[:,1].^2 .+ pq[:,2].^2 .* an^2))/cpars.Z^pow
+            res[ki, pow+1] = dot(aux, grid.xs .^ (2gam) .*(pq[:,1].^2 .+ pq[:,2].^2 .* an^2)) .*cpars.scale^pow
         end
     end
     res
 end
 
 "out table for occupied states"
-function report(cpars, grid, occ_block)
-    perm = sortperm((abs.(occ_block.ks) .+ occ_block.inds-(1 .+sign.(occ_block.ks))./2)*100+(abs.(occ_block.ks)+sign.(occ_block.ks)))
+function report(cpars, grid, occ_block; sortBy=:shell)
+    if sortBy==:shell
+        perm = sortperm((abs.(occ_block.ks) .+ occ_block.inds-(1 .+sign.(occ_block.ks))./2)*100+(abs.(occ_block.ks)+sign.(occ_block.ks)))
+    elseif sortBy==:energy
+        perm = sortperm((occ_block.ens))
+    elseif sortBy==:rhoav
+        perm = sortperm(moments(cpars, grid, occ_block)[:, 2])
+    else
+        error("sortBy=$sortBy must be in [:shell, :energy, :rhoav]")
+    end
     [occ_block.ks[perm] occ_block.inds[perm] occ_block.ens[perm] moments(cpars, grid, occ_block)[perm, :]]
 end
 end

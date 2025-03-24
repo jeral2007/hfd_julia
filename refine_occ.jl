@@ -15,24 +15,26 @@ function sh_blk_new_grid(cpars, old_grid, new_grid, occ_block)
     HfdTypes.ShellBlock(ks, occs, inds, vecs, ens)
 end
 
-function make_occ_blocks!(cpars, grid, occ_block; driver, N=250, kws...)
-    avros = HfdPostProcess.moments(cpars, grid, occ_block)[:, 2]
-    klusts = klust(avros)
-    println("========================================")
-    println("meta iterator with multigrid")
-    println("occupied states grouped by <r>")
-    for klust in klusts
-        rep = [occ_block.ks occ_block.inds occ_block.ens avros][klust, :]
-        display(rep)
+function make_occ_blocks!(cpars, grid, occ_block; N=57)
+    ravs = HfdPostProcess.moments(cpars, grid, occ_block, 1)[:, 2]
+    perm = sortperm(ravs)
+    klusts = Integer.(round.(log.(ravs./ravs[perm[1]])./log(3); digits=0))
+    MatUtils.kmeans!(klusts, log.(ravs./ravs[perm[1]]))
+    scales = map(sort(unique(klusts))) do klust
+        kis = findall(klusts .== klust) 
+        mean = sum(log.(ravs[kis]/ravs[1])) / length(kis)
+        ravs[1] .*exp(mean)
     end
+    
+    return scales
     occ_blocks = typeof(occ_block)[]
     grids = typeof(grid)[]
     cparss = typeof(cpars)[]
     for ii=1:length(klusts)
         klust = klusts[ii]
         println("processing cluster $ii")
-        new_cpars = CalcParams(cpars.Z, N, cpars.alpha)
-        new_grid = leg_rat_grid(N, 2*avros[klust[1]]*cpars.Z)
+        new_cpars = CalcParams(cpars.Z, N;alpha=cpars.alpha, scale=scales[ii])
+        new_grid = leg_rat_grid(N, 1)
         new_block = sh_blk_new_grid(cpars, grid, new_grid, occ_block)
         driver(new_cpars, new_grid, new_block; active=klust, kws...)
         occ_block = sh_blk_new_grid(new_cpars, new_grid, grid, new_block)
@@ -43,16 +45,3 @@ function make_occ_blocks!(cpars, grid, occ_block; driver, N=250, kws...)
     cparss, grids, occ_blocks
 end 
 
-function klust(arr, tol = 12)
-    inds = sortperm(arr)
-    klusters = Vector{Int64}[[1]]
-    for kk=2:length(inds)
-      #  @show  dist(arr[inds[kk-1]], arr[inds[kk]])
-        if arr[inds[kk]]<tol*arr[klusters[end][1]]
-            push!(klusters[end], inds[kk])
-        else
-            push!(klusters, [inds[kk]])
-        end
-    end
-    klusters
-end   

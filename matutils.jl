@@ -51,4 +51,30 @@ function accelerate!(val, oldval, old2val; eps=1e-10, eps_corr = 1e-2)
        val[ai] = old2val[ai] - corr
    end
 end
+
+"""kmeans clusterization of arr. The kl_inds array is the initial clusterization of arr. 
+Axes of kl_inds must be same to that of arr. kl_inds[kk] is the cluster number of kk-th element of arr."""
+function kmeans!(kl_inds, arr::Vector{T}) where {T<:Real}
+    kl_labs = sort(unique(kl_inds))
+    means = zeros(T, size(kl_labs, 1))
+    d2 = similar(means)
+    changed = true
+    while changed 
+        changed = false
+        for kk=1:size(kl_labs, 1)
+            mask = kl_inds .== kl_labs[kk]
+            means[kk] = sum(arr[mask])/count(mask)
+            d2[kk] = sum(arr[mask].^2)/count(mask)
+        end
+        @views d2 .-= means .^2
+        for ii in eachindex(arr)
+            dists = abs.(arr[ii] .- means)
+            ki = argmin(dists)
+            #@show ii ki kl_labs[ki] kl_inds[ii]
+            changed |= kl_labs[ki] != kl_inds[ii]
+            kl_inds[ii] = kl_labs[ki]
+        end
+    end
+    return sum(d2)
+end
 end   

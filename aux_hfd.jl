@@ -18,13 +18,14 @@ r^gamma*Q*Z/c -- small component values
 """
 function dirac_h1(cpars, grid, kappa)
     an = cpars.alpha*cpars.Z
+    sc_fact = cpars.scale*cpars.Z
     gamma = sqrt(kappa^2- an^2)
     eye = diagm(ones(length(grid.xs)))
-    coul = -eye .+ diagm(δnuc(cpars, grid))
+    δnuc_mat = diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
-    lhsPP = +coul
+    lhsPP = -eye - δnuc_mat
     lhsPQ = (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ = -2 .* xmat .+ coul.*an^2
+    lhsQQ = -2 .* xmat.*sc_fact .- (eye + δnuc_mat).*an^2
     lhsQP = -(gamma+kappa) .* eye .- xmat*grid.dmat
     lhs = [lhsPP lhsPQ;
            lhsQP lhsQQ]
@@ -32,7 +33,7 @@ function dirac_h1(cpars, grid, kappa)
     zm = zeros(length(grid.xs), length(grid.xs))
     rhs = [rhsP zm;
            zm rhsP.*an^2]
-    (lhs, rhs)
+    (lhs.*sc_fact, rhs)
 end
 
 function dirac_h1!(cpars, grid, kappa, lhs, rhs)
@@ -40,23 +41,28 @@ function dirac_h1!(cpars, grid, kappa, lhs, rhs)
     gamma = sqrt(kappa^2- an^2)
     N = length(grid.xs)
     eye = diagm(ones(eltype(grid.xs), N))
-    coul = -eye .+ diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
+    dnucvals = δnuc(cpars, grid)
+    sc_fac = cpars.scale*cpars.Z
     @views begin
     lhsPP = lhs[1:N, 1:N]
     lhsPQ = lhs[1:N, N+1:end]
     lhsQP = lhs[N+1:end,1:N]
     lhsQQ = lhs[N+1:end, N+1:end]
-    lhsPP .= coul
+    lhsPP .= -eye 
     lhsPQ .= (gamma-kappa) .* eye .+ xmat*grid.dmat
-    lhsQQ .= -2 .* xmat .+ coul.*an^2
+    lhsQQ .= -2 .* xmat.*sc_fac .- eye.*an^2
     lhsQP .= -(gamma+kappa) .* eye .- xmat*grid.dmat
     end
     for kk=1:N
+        lhs[kk, kk] += dnucvals[kk]
+        lhs[kk+N, kk+N] += -an^2 *dnucvals[kk]
     	rhs[kk,kk] = grid.xs[kk]
     	rhs[kk+N, kk+N] = an.^2 * grid.xs[kk]
-     end
+    end
+    lhs .*= sc_fac
 end
+
 """electrostatic potential on grid
 - cpars::CalcParams -- calculation parameteres 
 - grid::Grid -- radial grid nodes, weights etc
@@ -96,7 +102,7 @@ function coul(cpars, grid, kappa, pq)
 end
 
 
-rcut(en) = (-log(1e-10)/sqrt(2*abs(en)))
+rcut(en) = (-log(eps(en))/sqrt(2*abs(en)))
 
 """normalize given [P Q] bispinor, Q is the small component divided by αZ
 - kappa -- relativistic angular quantum number
@@ -139,16 +145,23 @@ end
 #    diagm([res; an^2 .* res])
 #end
 function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
-    res = zeros(T, cpars.N)
+    res = zeros(T, 2cpars.N)
+    resmat = zeros(T, 2cpars.N, 2cpars.N)
     an = cpars.alpha*cpars.Z
     dens = zeros(T, cpars.N)
     pqs = reshape(occ_block.vecs, :, 2, length(occ_block.ks))
     @views for ii=1:length(occ_block.ks)
         γ = sqrt(occ_block.ks[ii]^2-an^2)
-        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii].*grid.xs.^(2γ)./cpars.Z
+        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii].*grid.xs.^(2γ)
     end
-    res = grid.xs .* (grid.pot * dens)
-    diagm([res; an^2 .* res])
+    res2c = reshape(res, :, 2)
+
+    @views res2c[:, 1] .= grid.xs .* (grid.pot * dens).*cpars.scale
+    @views res2c[:, 2] .= res2c[:, 1] .* an^2
+    for ii=1:2cpars.N
+        resmat[ii, ii] = res[ii]
+    end
+    resmat
 end
 
 """saves hamiltonian and right hand part of dirac eq to preallocated buffers"""
@@ -208,6 +221,7 @@ function calc_occ!(cpars::Params{T}, grid::Grid{T},
 +=========================================================
 |Starting calc_occ iterations                             
 |atomic charge: $(cpars.Z)
+!atomic scale: $(cpars.scale) a.e
 |fine structure constant: $(cpars.alpha)
 |number of nodes in radial grid: $(cpars.N)
 |maximal iteration number: $maxiter
@@ -236,10 +250,13 @@ header = header*"""\n
             end
 	    old_hs[:, :, ki] .= hs[:, :, ki]
             ens, aux = eigen(hs[:, :, ki], rhs)
-            inds = findall(real(ens).>-1e0)[occ_block.inds[kmask]]
+            inds = findall(real(ens).>-(cpars.Z * cpars.scale)^2)[occ_block.inds[kmask]]
             oinds = findall(kmask)
-            occ_block.ens[kmask] .= real(ens[inds]).*cpars.Z^2
+            occ_block.ens[kmask] .= real(ens[inds])./cpars.scale^2
             for (fi, vi) in zip(oinds, inds)
+                if (active!=nothing) && (fi in active)
+                    continue
+                end
                 rc = min(rcut(real(ens[vi])), grid.xs[end])
                 occ_block.vecs[:, fi] .= normalize!(cpars, grid, real(aux[:, vi]), kappa, rc)
             end
@@ -281,14 +298,24 @@ hcore_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid, occ_block;
                                                 caption="non-interacting electrons approximation", kws...)
 
 function sc_coul(cpars, grid, occ_block, kappa) 
-    coul_pot(cpars, grid, occ_block, kappa) .* (1 - 1/cpars.Z)
+    ztot = sum(occ_block.occs)
+    coul_pot(cpars, grid, occ_block, kappa) .* (1 - 1/ztot)
 end
 
 sc_coul_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid, occ_block; 
                                                           caption="scaled (Z-1/Z) coulumb interaction", 
                                                           pot_func=sc_coul,
                                                           kws...)
-
+"""auxilary function to evaluate exchange matrix. 
+Arguments:
+- cpars::Params, grid::Grid -- Parameters of Calculation and grid.
+- k1::Int -- κ value for Hamiltonian Hκ
+- k2::Int -- κ value of electronic state 
+- pq::Vector -- values of big and scaled small component of electronic state on grid.
+- occ::Float -- occupation number  of shell of state
+- res::Matrix -- at the end of exc_func! evaluation, exchange part
+corresponding to interaction with state pq 
+will be added to res"""
 function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     lj(κ) = abs(κ) - Int((-sign(κ)+1)/2), 2*abs(κ)-1
     l1, j1 = lj(k1)
@@ -298,8 +325,9 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     gam2 = sqrt(k2^2-an^2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ/cpars.Z
+        #fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ
         #fact = grid.xs[jj]^(gam1+gam2)*grid.pot[ii, jj]*occ/cpars.Z
+        fact = grid.xs[jj]^(gam1+gam2)*occ*grid.xs[ii]*cpars.scale
         if grid.xs[ii]>eps(eltype(grid.xs))
             fact*=grid.xs[ii]^(gam2-gam1)
         else
@@ -307,21 +335,21 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
         end
         rg, rl = max(grid.xs[ii], grid.xs[jj]), min(grid.xs[ii], grid.xs[jj])
         for kj=kmin:2:kmax
-            if (l1+l2+Int(kj/2)) % 2 !=0
+            pk = div(kj, 2)
+            if (l1+l2+pk) % 2 !=0
                 continue
             end
-            pk = Int(kj/2)
-            fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
-            if pk == 0 # to ensure exact cancelation of coulumb and exchange for same state
-                tmp = grid.pot[ii, jj] * grid.xs[jj]^(2gam1)*grid.xs[ii]*occ/cpars.Z
-                tmp *= symb3j0.gam2s(j1, j2, kj)
-                res[ii, jj] -= tmp*pq[ii]*pq[jj]
-                res[cpars.N+ii, cpars.N+jj] -= tmp*pq[cpars.N+ii]*pq[cpars.N+jj]
-                continue
-            end
-            #fact2 = symb3j0.gam2s(j1, j2, kj)*(rl/rg)^pk
-            res[ii, jj] -= fact*fact2*pq[ii]*pq[jj]*grid.xs[ii] #big component
-            res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N]*grid.xs[ii] # small component
+            #if pk == 0 # to ensure exact cancelation of coulumb and exchange for same state
+             #   tmp = grid.pot[ii, jj] * grid.xs[jj]^(2gam1)*grid.xs[ii]*occ*cpars.scale
+             #   tmp *= symb3j0.gam2s(j1, j2, 0)
+             #   res[ii, jj] -= tmp*pq[ii]*pq[jj]
+             #   res[cpars.N+ii, cpars.N+jj] -= tmp*pq[cpars.N+ii]*pq[cpars.N+jj]*an^2
+             #   continue
+            #end
+            fact2=symb3j0.gam2s(j1, j2, kj)*grid.pots[ii, jj, pk+1]
+            #fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
+            res[ii, jj] -= fact*fact2*pq[ii]*pq[jj] #big component
+            res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^2*pq[ii+cpars.N]*pq[jj+cpars.N] # small component
         end
     end
 end
@@ -329,7 +357,6 @@ end
 """exchange part of electron interaction"""
 function exc_pot!(cpars, grid, occ_block, kappa, res)
     κ_vals = sort(unique(occ_block.ks))
-   # res = zeros(eltype(grid.xs), 2*cpars.N, 2*cpars.N)
     for k2 in κ_vals
         f_inds = findall(k2 .== occ_block.ks)
         for fi in f_inds
@@ -337,24 +364,45 @@ function exc_pot!(cpars, grid, occ_block, kappa, res)
                       occ_block.vecs[:, fi], occ_block.occs[fi], res)
         end
     end
-    #@views res ./= cpars.Z
-    #@views for ii=1:cpars.N
-    #    res[ii,1:cpars.N] .*=grid.xs[ii]
-    #    res[cpars.N+ii,cpars.N+1:end] .*=grid.xs[ii]
-    #end
     res
 end
-
+"""Hartree Fock mean field matrix of occupied shells in occ_block. Result for κ part of Hamiltonian"""
 function hfd_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     exc_pot!(cpars, grid, occ_block, kappa, res)
     res
 end
 
+"Hartree mean field + exchange with occupied shells with same κ (dominant exchange part, almost slater hole)"
+function hded_pot(cpars, grid, occ_block, kappa)
+    res = coul_pot(cpars, grid, occ_block, kappa)
+    an2 = (cpars.alpha*cpars.Z)^2 #kukuruznik
+    γ = sqrt(kappa^2-an2)
+    for f_i=1:length(occ_block.ks)
+        if (occ_block.ks[f_i] != kappa)
+            continue
+        end
+        for jj=1:cpars.N, ii=1:cpars.N
+            fact = occ_block.occs[f_i]/(2abs(occ_block.ks[f_i])) * grid.pot[ii, jj]*grid.xs[ii]*cpars.scale
+            fact *= grid.xs[jj]^(2γ)
+            res[ii, jj] -= fact*occ_block.vecs[ii, f_i] * occ_block.vecs[jj, f_i]
+            res[ii+cpars.N, jj+cpars.N] -= fact*occ_block.vecs[ii+cpars.N, f_i] * occ_block.vecs[jj+cpars.N, f_i]*an2
+        end
+    end
+    res
+end
+            
 hfd_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid, occ_block; 
                                                           caption="Dirac Hartree Fock", 
                                                           pot_func=hfd_pot,
                                                           kws...)
+
+hded_calc!(cpars, grid, occ_block; kws...) = calc_occ!(cpars, grid,occ_block;
+                                                      caption="Dirac Hartree + dominant exchange part",
+                                                      pot_func=hded_pot,
+                                                      kws...)
+
+
 include("refine_occ.jl")
 end
 

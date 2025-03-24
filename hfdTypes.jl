@@ -7,15 +7,17 @@ export Params, δnuc
 - Z::Real -- nuclear charge
 - N::Int -- number of points of grid
 - alpha::Real -- fine structure constant value (reciprocal to speed of light in atomic units)
+- scale -- scale factor (defaults to 1) for dirac equation (charge -> charge/scale)
 """
 abstract type Params{T} end
 struct CalcParams{T} <: Params{T}
     Z :: T
     N :: Int64
+    scale :: T
     alpha :: T
 end
 
-CalcParams(Z::T, N::Int64) where {T} = CalcParams{T}(Z, N, 0.0072973525643) # α value from wiki
+CalcParams(Z::T, N::Int64; scale::T = 1e0, alpha::T = 0.0072973525643) where {T} = CalcParams{T}(Z, N, scale, alpha) # α value from wiki
 
 """struct to store calculation parameters
 - Z::Real -- nuclear charge
@@ -26,11 +28,11 @@ CalcParams(Z::T, N::Int64) where {T} = CalcParams{T}(Z, N, 0.0072973525643) # α
 struct CalcParamsExpNuc{T} <: Params{T}
     Z::T
     N::Int64
-    rnuc::T
     alpha::T
+    scale ::T
+    rnuc::T
 end
-CalcParamsExpNuc(Z::T, N::Int64) where {T} = CalcParamsExpNuc{T}(Z, N, 5e-5, 0.0072973525643) # α value from wiki
-CalcParamsExpNuc(Z::T, N::Int64, rnuc::T) where {T} = CalcParamsExpNuc{T}(Z, N, rnuc, 0.0072973525643) # α value from wiki
+CalcParamsExpNuc(Z::T, N::Int64; rnuc::T=5e-5, alpha::T = 0.0072973525643, scale::T=one(T)) where {T} = CalcParamsExpNuc{T}(Z, N, alpha, scale, rnuc) # α value from wiki
 
 
 abstract type Grid{T} end
@@ -43,6 +45,7 @@ struct RatGrid{T} <: Grid{T}
     gl::Matrix{T}
     ker:: Matrix{T}
     pot :: Matrix{T}
+    pots :: Array{T}
 end
 
 struct ExpGrid{T} <: Grid{T}
@@ -53,9 +56,10 @@ struct ExpGrid{T} <: Grid{T}
     g:: Matrix{T}
     ker:: Matrix{T}
     pot :: Matrix{T}
+    pots :: Array{T}
 end
 "constructs legendre rational functions grid"
-function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=0)
+function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=23)
     as, gs = PolyNodes.alphas_leg(N), PolyNodes.gammas_leg(N)
     ts, ws = PolyNodes.nodes(as, gs, 2e0) 
     if rcut != Inf
@@ -75,7 +79,7 @@ function leg_rat_grid(N, k=2e2, rcut=Inf, kmax=0)
     end
     RatGrid(xs, wxs, dmat, ts, derinv_mat(xs, wxs, ts, dmat),  
             derinv_mat(Right(), xs, wxs, ts, dmat), 
-            nullspace(dmat2), pots[:, :, 1])
+            nullspace(dmat2), pots[:, :, 1], pots)
 end
 "constructs exponential grid"
 function leg_exp_grid(N, x1, kmax=23)
@@ -140,11 +144,15 @@ function from_dict(occ, T, nx)
                zeros(T, N)), ztot
 end
 
-function project(rat_grid::RatGrid, grid, func)
+function project(cpars_src, rat_grid::RatGrid, cpars_dst, grid, func)
    inc(x) = x + one(x)
    k = rat_grid.xs[2]*inc(-rat_grid.ts[2])/inc(rat_grid.ts[2])
-   tvals = (grid.xs .- k) ./ (grid.xs .+ k)
-   func.(tvals)
+   res = zeros(eltype(grid), cpars_dst.N)
+   for kk=1:cpars_dst.N
+       ρ = grid.xs[kk]*cpars_dst.scale/cpars_src.scale
+       t = (ρ-k)/(ρ+k)
+       res[kk] = func(t)
+   end
 end
 function project(exp_grid::ExpGrid, grid, func)
    inc(x) = x + one(x)
@@ -152,12 +160,7 @@ function project(exp_grid::ExpGrid, grid, func)
    res = similar(grid.ts) 
    c = log(inc(exp_grid.xs[2]))/inc(exp_grid.ts[2])
    for ii=1:length(res)
-       tval= dec(log(inc(grid.xs[ii]))/c)
-       if (tval<1) 
-           res[ii] = func(tval)
-       else
-           res[ii] = 0e0
-       end
+       tval= dec(log(inc(grid.xs[ii].*cpars_dst.scale/cpars_src.scale))/c)
    end
    res
 end
@@ -212,11 +215,11 @@ derinv_mat(xs, ws, ts, dmat) = derinv_mat(Left(), xs, ws, ts, dmat)
 """nuclei potential correction on _grid_; total potential U(r) = -Z/r(1 + δnuc(r))"""
 δnuc(cpars, grid) = zeros(eltype(grid.xs), length(grid.xs))
 function δnuc(cpars::CalcParamsExpNuc, grid) 
-    cn = 1e0/cpars.Z/cpars.rnuc
+    cn = 1e0/cpars.rnuc
     res = zeros(eltype(grid.xs), cpars.N)
     for ii=1:cpars.N
-        ux= cn * grid.xs[ii]
-        res[ii] = -exp(-ux)*(1 - ux/2)
+        ux= cn * grid.xs[ii]*cpars.scale
+        res[ii] = -exp(-ux)*(1 + ux)
     end
     res
 end
