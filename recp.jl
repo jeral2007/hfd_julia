@@ -74,7 +74,12 @@ function (ecp::ECPnum)(cpars, grid, kappa)
         res .+=lblock_on_grid(cpars, grid, ecp.lblocks[l+2])
     end
     if (0<l<=length(ecp.soblocks))
-        res .+= s*lblock_on_grid(cpars, grid, ecp.soblocks[l])#*2/(l*(l+1))
+        #if (s<0)
+        #  # @views res .+= s.*lblock_on_grid(cpars, grid, ecp.soblocks[l])#*2./ (l*(l+1))
+       # else 
+         #  res .-=
+       # end
+       res .-= 1/kappa *lblock_on_grid(cpars, grid, ecp.soblocks[l]).*(l*(l+1)/2)
     end
     res
 end
