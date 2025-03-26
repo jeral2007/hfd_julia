@@ -6,6 +6,8 @@ include("postprocess.jl")
 using LinearAlgebra
 using .HfdTypes
 
+#gam(cpars, kappa) = mod(sqrt(kappa^2-(cpars.alpha*cpars.Z)^2), 1)
+gam(cpars, kappa) = 0
 """dirac one-electron hamiltonian for radial functions
 - cpars::CalcParams -- calculation parameteres 
 - grid::Grid -- radial grid nodes, weights etc
@@ -13,13 +15,13 @@ using .HfdTypes
 
 OUTPUT: lhs, rhs - matrices for generalized eigen value problem
 eigen vectors for this problem are of form [P; Q] where 
-r^gamma*P -- big component values on grid,  
-r^gamma*Q*Z/c -- small component values
+r*P -- big component values on grid,  
+r*Q*Z/c -- small component values
 """
 function dirac_h1(cpars, grid, kappa)
     an = cpars.alpha*cpars.Z
     sc_fact = cpars.scale*cpars.Z
-    gamma = sqrt(kappa^2- an^2)
+    gamma = gam(cpars, kappa)
     eye = diagm(ones(length(grid.xs)))
     δnuc_mat = diagm(δnuc(cpars, grid))
     xmat = diagm(grid.xs)
@@ -38,7 +40,7 @@ end
 
 function dirac_h1!(cpars, grid, kappa, lhs, rhs)
     an = cpars.alpha*cpars.Z
-    gamma = sqrt(kappa^2- an^2)
+    gamma = gam(cpars, kappa)
     N = length(grid.xs)
     eye = diagm(ones(eltype(grid.xs), N))
     xmat = diagm(grid.xs)
@@ -63,43 +65,6 @@ function dirac_h1!(cpars, grid, kappa, lhs, rhs)
     lhs .*= sc_fac
 end
 
-"""electrostatic potential on grid
-- cpars::CalcParams -- calculation parameteres 
-- grid::Grid -- radial grid nodes, weights etc
-- kappa - angular quantum number
--pq - [P; Q] Array with P and Q values on grid
-
-OUTPUT:
- Zel(r) = U(r)*r on grid, U(r) - electrostatic potential
-"""
-function coul(cpars, grid, kappa, pq)
-    xs = grid.xs
-    ws = grid.ws
-    alpha = cpars.alpha
-    Z = cpars.Z
-    T = eltype(xs)
-    N = cpars.N
-    an = alpha*Z
-    gamma = sqrt(kappa^2-an^2)
-    dens = zeros(T,N)
-    @views begin
-        P = pq[1:N]
-        Q = pq[N+1:end]
-    end
-    dens .= P .^2 + (an.*Q) .^2
-    mask = abs.(dens).<1e-15
-    dens .*= xs.^(2*gamma)
-#    dens[mask] .= 0e0
-    intl = zero(T)
-    intg = dot(ws, dens./xs)
-    res = zeros(T, N)
-    @inbounds for ii=1:N
-        intl += ws[ii]*dens[ii]
-        intg -= ws[ii]*dens[ii]/xs[ii]
-        res[ii] = (intl+xs[ii]*intg)
-    end
-    res
-end
 
 
 rcut(en) = (-log(1e-9)/sqrt(2*abs(en)))
@@ -122,14 +87,13 @@ returns normalized pq vector
 """
 function normalize!(cpars, grid, pq, kappa, rcut)
     an = cpars.alpha*cpars.Z
-    gamma = sqrt(kappa^2-an^2)
+    gamma = gam(cpars, kappa)
     @views begin
         P = pq[1:cpars.N]
         Q = pq[cpars.N+1:end]
     end
     mask = grid.xs .< rcut
-    dens = (P.^2 + an^2*Q.^2)
-    dens .*= grid.xs.^(2*gamma)
+    dens = (P.^2 + an^2*Q.^2).*grid.xs.^(2gamma)
     nrm2 = dot(grid.ws[mask], dens[mask])
     pq ./= sqrt(nrm2)
     P[.!mask] .= 0e0
@@ -142,15 +106,6 @@ end
 - grid -- grid nodes and weights packed to _Grid_ struct
 - occ_block -- data of occupied states packed to _ShellBlock_ struct
 """
-#function coul_pot(cpars::CalcParams{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
-#    res = zeros(T, cpars.N)
-#    an = cpars.alpha*cpars.Z
-#    @inbounds for ii=1:length(occ_block.ks)
-#            res .+= occ_block.occs[ii].*coul(cpars, grid, occ_block.ks[ii],
-#                                                                      occ_block.vecs[:, ii])./cpars.Z
-#    end
-#    diagm([res; an^2 .* res])
-#end
 function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kappa) where {T}
     res = zeros(T, 2cpars.N)
     resmat = zeros(T, 2cpars.N, 2cpars.N)
@@ -158,11 +113,10 @@ function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kap
     dens = zeros(T, cpars.N)
     pqs = reshape(occ_block.vecs, :, 2, length(occ_block.ks))
     @views for ii=1:length(occ_block.ks)
-        γ = sqrt(occ_block.ks[ii]^2-an^2)
-        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii].*grid.xs.^(2γ)
+        γ = gam(cpars, occ_block.ks[ii])
+        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii] .* grid.xs.^(2γ)
     end
     res2c = reshape(res, :, 2)
-
     @views res2c[:, 1] .= grid.xs .* (grid.pot * dens).*cpars.scale
     @views res2c[:, 2] .= res2c[:, 1] .* an^2
     for ii=1:2cpars.N
@@ -271,12 +225,7 @@ header = header*"""\n
                 if (active!=nothing) && (!(fi in active))
                     continue
                 end
-                #rc = min(rcut(real(ens[vi]), sqrt(kappa^2 - cpars.alpha^2*cpars.Z^2)), rc_hard/cpars.scale)
-                rc = rc_hard
-                if (abs(kappa)+sign(kappa)/2>3)
-                    #rc =  min(rcut(real(ens[vi]), sqrt(kappa^2 - cpars.alpha^2*cpars.Z^2)), 2/cpars.scale)
-                    rc = rc_hard/2
-                end
+                rc = min(rcut(real(ens[vi]), sqrt(kappa^2 - cpars.alpha^2*cpars.Z^2)), rc_hard/cpars.scale)
                 occ_block.vecs[:, fi] .= normalize!(cpars, grid, real(aux[:, vi]), kappa, rc)
             end
         end
@@ -343,33 +292,18 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     l1, j1 = lj(k1)
     l2, j2 = lj(k2)
     an = cpars.alpha*cpars.Z
-    gam1 = sqrt(k1^2-an^2)
-    gam2 = sqrt(k2^2-an^2)
+    gam1 = gam(cpars, k1)
+    gam2 = gam(cpars, k2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        #fact = grid.xs[jj]^(gam1+gam2)*grid.ws[jj]*occ
-        #fact = grid.xs[jj]^(gam1+gam2)*grid.pot[ii, jj]*occ/cpars.Z
-        fact = grid.xs[jj]^(gam1+gam2)*occ*grid.xs[ii]*cpars.scale
-        if grid.xs[ii]>eps(eltype(grid.xs))
-            fact*=grid.xs[ii]^(gam2-gam1)
-        else
-            fact = 0e0
-        end
-        rg, rl = max(grid.xs[ii], grid.xs[jj]), min(grid.xs[ii], grid.xs[jj])
+        fact = occ*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
+        fact *= grid.xs[ii]^(gam1-gam2)
         for kj=kmin:2:kmax
             pk = div(kj, 2)
             if (l1+l2+pk) % 2 !=0
                 continue
             end
-            #if pk == 0 # to ensure exact cancelation of coulumb and exchange for same state
-             #   tmp = grid.pot[ii, jj] * grid.xs[jj]^(2gam1)*grid.xs[ii]*occ*cpars.scale
-             #   tmp *= symb3j0.gam2s(j1, j2, 0)
-             #   res[ii, jj] -= tmp*pq[ii]*pq[jj]
-             #   res[cpars.N+ii, cpars.N+jj] -= tmp*pq[cpars.N+ii]*pq[cpars.N+jj]*an^2
-             #   continue
-            #end
             fact2=symb3j0.gam2s(j1, j2, kj)*grid.pots[ii, jj, pk+1]
-            #fact2=symb3j0.gam2s(j1, j2, kj)*rl^pk/rg^(pk+1)
             res[ii, jj] -= fact*fact2*pq[ii]*pq[jj] #big component
             res[ii, jj+cpars.N] -= fact*fact2*pq[ii]*pq[jj+cpars.N]*an^2 #big component
             res[cpars.N+ii, cpars.N+jj] -=fact*fact2*an^4*pq[ii+cpars.N]*pq[jj+cpars.N] # small component
@@ -401,7 +335,7 @@ end
 function hded_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     an = (cpars.alpha*cpars.Z)
-    γ = sqrt(kappa^2-an^2)
+    γ = gam(cpars, kappa)
     for f_i=1:length(occ_block.ks)
         if (occ_block.ks[f_i] != kappa)
             continue
