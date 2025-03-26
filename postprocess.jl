@@ -8,6 +8,7 @@ function moments(cpars, grid, occ_block, maxpow=2)
         aux = grid.ws.*grid.xs.^(pow)
         for ki=1:length(occ_block.ks)
             gam = mod(sqrt(occ_block.ks[ki]^2-an^2), 1)
+            gam = 0
             pq = reshape(occ_block.vecs[:, ki], :, 2)
             res[ki, pow+1] = dot(aux, grid.xs .^ (2gam) .*(pq[:,1].^2 .+ pq[:,2].^2 .* an^2)) .*cpars.scale^pow
         end

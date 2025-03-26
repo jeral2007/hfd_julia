@@ -6,7 +6,8 @@ include("postprocess.jl")
 using LinearAlgebra
 using .HfdTypes
 
-gam(cpars, kappa) = mod(sqrt(kappa^2-(cpars.alpha*cpars.Z)^2), 1)
+#gam(cpars, kappa) = mod(sqrt(kappa^2-(cpars.alpha*cpars.Z)^2), 1)
+gam(cpars, kappa) = 0
 """dirac one-electron hamiltonian for radial functions
 - cpars::CalcParams -- calculation parameteres 
 - grid::Grid -- radial grid nodes, weights etc
@@ -334,7 +335,7 @@ end
 function hded_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     an = (cpars.alpha*cpars.Z)
-    γ = mod(sqrt(kappa^2-an^2), 1)
+    γ = gam(cpars, kappa)
     for f_i=1:length(occ_block.ks)
         if (occ_block.ks[f_i] != kappa)
             continue
