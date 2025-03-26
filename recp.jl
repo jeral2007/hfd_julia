@@ -49,9 +49,9 @@ using ..GausECP
 function lblock_on_grid(cpars, grid, lblock)
     res = zeros(eltype(grid.xs), length(grid.xs))
     for kk=1:length(lblock.alphas)
-        α = lblock.alphas[kk]/cpars.Z^2
+        α = lblock.alphas[kk]*cpars.scale^2
         res .+=grid.xs .^ (lblock.pows[kk]-1) .* (exp.(-α .* grid.xs .^ 2) .* 
-                                                  (lblock.coefs[kk]/cpars.Z^(lblock.pows[kk])))
+                                                  (lblock.coefs[kk]*cpars.scale^(lblock.pows[kk])))
     end
     res
 end
@@ -68,7 +68,7 @@ function (ecp::ECPnum)(cpars, grid, kappa)
     j = abs(kappa)-1/2
     l = Int(j + sign(kappa)/2)
     s = -sign(kappa)
-    res = ecp.Nel/cpars.Z .*ones(eltype(grid.xs), length(grid.xs))
+    res = ecp.Nel*cpars.scale .*ones(eltype(grid.xs), length(grid.xs))
     res .+=lblock_on_grid(cpars, grid, ecp.lblocks[1])
     if (l+2)<=length(ecp.lblocks)
         res .+=lblock_on_grid(cpars, grid, ecp.lblocks[l+2])

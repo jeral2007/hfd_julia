@@ -147,12 +147,13 @@ end
 function project(cpars_src, rat_grid::RatGrid, cpars_dst, grid, func)
    inc(x) = x + one(x)
    k = rat_grid.xs[2]*inc(-rat_grid.ts[2])/inc(rat_grid.ts[2])
-   res = zeros(eltype(grid), cpars_dst.N)
+   res = zeros(eltype(grid.xs), cpars_dst.N)
    for kk=1:cpars_dst.N
        ρ = grid.xs[kk]*cpars_dst.scale/cpars_src.scale
        t = (ρ-k)/(ρ+k)
        res[kk] = func(t)
    end
+   res
 end
 function project(exp_grid::ExpGrid, grid, func)
    inc(x) = x + one(x)

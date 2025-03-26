@@ -102,7 +102,14 @@ function coul(cpars, grid, kappa, pq)
 end
 
 
-rcut(en) = (-log(eps(en))/sqrt(2*abs(en)))
+rcut(en) = (-log(1e-9)/sqrt(2*abs(en)))
+function rcut(en, gam)  
+    rc0 = rcut(en)
+    if rc0^gam >1/sqrt(eps(en))
+        rc0 += gam*log(rc0)
+    end
+    rc0
+end
 
 """normalize given [P Q] bispinor, Q is the small component divided by αZ
 - kappa -- relativistic angular quantum number
@@ -196,7 +203,8 @@ occ_block is updated as result of calculation
 """    
 function calc_occ!(cpars::Params{T}, grid::Grid{T}, 
     occ_block::ShellBlock{T}; pot_func, 
-    maxiter=50, tol::T = 1e-6, dump::T = 0.5, caption, ecp=nothing, aitken=false, active = nothing) where {T}
+    maxiter=50, tol::T = 1e-6, dump::T = 0.5, caption, ecp=nothing, aitken=false, active = nothing,
+    rc_hard=3e1) where {T}
     κs = sort(unique(occ_block.ks))
     rhs = zeros(T, cpars.N*2, cpars.N*2)
     lhs = zeros(T, size(rhs))
@@ -227,12 +235,18 @@ function calc_occ!(cpars::Params{T}, grid::Grid{T},
 |maximal iteration number: $maxiter
 |tolerance: $tol
 |dumping: $dump 
+| maximal rcut: $rc_hard a.e.
 |aitken accelerated: $aitken
 |$caption\n"""
     if ecp!=nothing
        header = header*"""
 semilocal ecp with $(ecp.Nel) core electrons, lmax=$(length(ecp.lblocks)-1), nso = $(length(ecp.lblocks))"""
     end 
+    if active!=nothing
+        header=header*"""\n
+|active orbitals: $(active)
+"""
+    end
 header = header*"""\n
 +========================================================="""
     println(header)
@@ -254,10 +268,15 @@ header = header*"""\n
             oinds = findall(kmask)
             occ_block.ens[kmask] .= real(ens[inds])./cpars.scale^2
             for (fi, vi) in zip(oinds, inds)
-                if (active!=nothing) && (fi in active)
+                if (active!=nothing) && (!(fi in active))
                     continue
                 end
-                rc = min(rcut(real(ens[vi])), grid.xs[end])
+                #rc = min(rcut(real(ens[vi]), sqrt(kappa^2 - cpars.alpha^2*cpars.Z^2)), rc_hard/cpars.scale)
+                rc = rc_hard
+                if (abs(kappa)+sign(kappa)/2>3)
+                    #rc =  min(rcut(real(ens[vi]), sqrt(kappa^2 - cpars.alpha^2*cpars.Z^2)), 2/cpars.scale)
+                    rc = rc_hard/2
+                end
                 occ_block.vecs[:, fi] .= normalize!(cpars, grid, real(aux[:, vi]), kappa, rc)
             end
         end
@@ -272,6 +291,9 @@ header = header*"""\n
 	    delta = abs.(old_hs[:, :, ki] .- hs[:, :, ki])
 	    maxind = argmax(delta)
 	    mi, mj = [maxind[1], maxind[2]] .% N .+ 1
+        if delta[maxind] > 1e2
+            @warn "too big delta at $mi, $mj"
+        end
             #maxdelta[ki] = delta[maxind]*exp(-1e-3*(grid.xs[1+(maxind[1] % (N+1))]+grid.xs[1+(maxind[2] % (N+1))])) #to exclude inf points
             maxdelta[ki] = delta[maxind]/sqrt(grid.xs[mi]*grid.xs[mj])
             println("$kappa  $(maxdelta[ki])")
@@ -379,7 +401,7 @@ end
 function hded_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     an = (cpars.alpha*cpars.Z)
-    γ = sqrt(kappa^2-an2)
+    γ = sqrt(kappa^2-an^2)
     for f_i=1:length(occ_block.ks)
         if (occ_block.ks[f_i] != kappa)
             continue
