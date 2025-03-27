@@ -7,7 +7,14 @@ using LinearAlgebra
 using .HfdTypes
 
 #gam(cpars, kappa) = mod(sqrt(kappa^2-(cpars.alpha*cpars.Z)^2), 1)
-gam(cpars, kappa) = 0
+function gam(cpars, kappa) 
+    if abs(kappa)!=1  
+        return 0
+    else 
+        return sqrt(1-(cpars.alpha*cpars.Z)^2)
+    end
+end
+
 """dirac one-electron hamiltonian for radial functions
 - cpars::CalcParams -- calculation parameteres 
 - grid::Grid -- radial grid nodes, weights etc
@@ -297,7 +304,7 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
         fact = occ*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
-        fact *= grid.xs[ii]^(gam1-gam2)
+        fact *= grid.xs[ii]^(gam2-gam1)
         for kj=kmin:2:kmax
             pk = div(kj, 2)
             if (l1+l2+pk) % 2 !=0

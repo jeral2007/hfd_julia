@@ -140,6 +140,7 @@ function from_dict(occ, T, nx)
     end
     perm = sortperm(abs.(kappas))
     N = length(kappas)
+    #occs .*= (occs.+1)./(2 .*abs.(kappas) .+ 1) # i am sorry for this
     ShellBlock(kappas[perm], occs[perm], finds[perm], zeros(T, 2nx, N), 
                zeros(T, N)), ztot
 end
