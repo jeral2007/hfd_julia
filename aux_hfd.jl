@@ -120,8 +120,9 @@ function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kap
     dens = zeros(T, cpars.N)
     pqs = reshape(occ_block.vecs, :, 2, length(occ_block.ks))
     @views for ii=1:length(occ_block.ks)
+        nmax = 2abs(occ_block.ks[ii])
         γ = gam(cpars, occ_block.ks[ii])
-        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii] .* grid.xs.^(2γ)
+        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* nmax  .* grid.xs.^(2γ)
     end
     res2c = reshape(res, :, 2)
     @views res2c[:, 1] .= grid.xs .* (grid.pot * dens).*cpars.scale
@@ -294,7 +295,7 @@ Arguments:
 - res::Matrix -- at the end of exc_func! evaluation, exchange part
 corresponding to interaction with state pq 
 will be added to res"""
-function exc_func!(cpars, grid, k1, k2, pq, occ, res)
+function exc_func!(cpars, grid, k1, k2, pq, res)
     lj(κ) = abs(κ) - Int((-sign(κ)+1)/2), 2*abs(κ)-1
     l1, j1 = lj(k1)
     l2, j2 = lj(k2)
@@ -303,7 +304,8 @@ function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     gam2 = gam(cpars, k2)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
-        fact = occ*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
+        nmax = 2abs(k2)
+        fact = nmax*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
         fact *= grid.xs[ii]^(gam2-gam1)
         for kj=kmin:2:kmax
             pk = div(kj, 2)
@@ -326,18 +328,63 @@ function exc_pot!(cpars, grid, occ_block, kappa, res)
         f_inds = findall(k2 .== occ_block.ks)
         for fi in f_inds
             exc_func!(cpars, grid, kappa, k2, 
-                      occ_block.vecs[:, fi], occ_block.occs[fi], res)
+                      occ_block.vecs[:, fi],  res)
         end
     end
     res
 end
+
+function dens_of(cpars, grid, pq, kappa)
+    pq2 = reshape(pq, :, 2)
+    gamma = gam(cpars, kappa)
+    grid.xs.^(2gamma) .* (pq2[:, 1].^2 .+ pq2[:, 2].^2 .*(cpars.alpha*cpars.Z)^2)
+end
+
 """Hartree Fock mean field matrix of occupied shells in occ_block. Result for κ part of Hamiltonian"""
 function hfd_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
     exc_pot!(cpars, grid, occ_block, kappa, res)
+    #open shell corrections
+    for ki = 1:length(occ_block.ks)
+        if occ_block.ks[ki] != kappa
+            continue
+        end
+        if abs(2abs(occ_block.ks[ki])-occ_block.occs[ki])>eps(occ_block.occs[ki])
+            n = occ_block.occs[ki]
+            nmax = 2abs(kappa)
+            fact = -nmax*(1 - (n-1)/(nmax-1))
+            make_correction!(cpars, grid, occ_block.vecs[:, ki], 
+                fact, kappa, res)
+        end
+    end
     res
 end
 
+function make_correction!(cpars, grid, pq, fact, kappa, res)
+    j = 2*abs(kappa) - 1
+    nmax = 2*abs(kappa)
+    kmin, kmax = 0, 2j
+    gamma = gam(cpars, kappa)
+    dens = dens_of(cpars, grid, pq, kappa)
+    cpot = (grid.pot*dens)*(nmax-1)/nmax
+    an2 = (cpars.alpha*cpars.Z)^2
+    buf = zeros(length(dens))
+    for kj=4:4:kmax
+        pk = div(kj, 2)
+        buf .= (grid.pots[:, :, pk+1]*dens)
+        @views cpot .+= symb3j0.gam2s(j, j, kj).* buf #relativistic average as in https://arxiv.org/pdf/1804.09986
+    end
+    #@views cpot .*= grid.xs .* cpars.scale
+  
+    for ii=1:cpars.N, jj=1:cpars.N
+        dVf = grid.ws[jj]*grid.xs[jj]^(2gamma)
+        dVf *= fact*cpot[ii]*grid.xs[ii]*cpars.scale
+        res[ii, jj] += pq[ii]*pq[jj]*dVf
+        res[ii+cpars.N, jj] +=an2*pq[ii+cpars.N]*pq[jj]*dVf
+        res[ii, jj+cpars.N] +=an2*pq[jj+cpars.N]*pq[ii]*dVf
+        res[ii+cpars.N, jj+cpars.N] +=an2^2*pq[ii+cpars.N]*pq[jj+cpars.N]*dVf
+    end
+end 
 "Hartree mean field + exchange with occupied shells with same κ (dominant exchange part, almost slater hole)"
 function hded_pot(cpars, grid, occ_block, kappa)
     res = coul_pot(cpars, grid, occ_block, kappa)
