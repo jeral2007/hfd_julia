@@ -1,6 +1,7 @@
 module GausOpt
-export get_coefs make_proj_vecs, make_target
-
+export get_coefs, make_proj_vecs, make_target, scale, one_exp_vec
+using LinearAlgebra
+using Optim
 function gaus_smat(cpars, grid, alphas, l)
     I1(α) = dot(grid.ws, grid.xs.^(2l+2).*exp.(-α .* grid.xs.^2))
     smat = broadcast((α, β)-> I1(α+β)/sqrt(I1(2α)*I1(2β)),
@@ -34,7 +35,7 @@ end
 function make_proj_vecs(cpars, grid, cfn, alphas, l)
     proj_vecs = zeros(eltype(grid.xs), cpars.N, size(cfn.coefs, 2))
     for ii=1:cpars.N, jj = 1:size(cfn.coefs, 2)
-        x = grid_ecp.xs[ii]
+        x = grid.xs[ii]
         for kk=1:size(cfn.coefs, 1)
             c = cfn.coefs[kk, jj]/cfn.norms[kk]
             proj_vecs[ii, jj] += c*exp(-alphas[kk]*x^2) * x^l
@@ -42,6 +43,7 @@ function make_proj_vecs(cpars, grid, cfn, alphas, l)
     end
     proj_vecs
 end
+
 scale_all(alphas, ts) = 1/sqrt(2) .* alphas.*(1  .+ ts.^2 ./ (1e0.+ts.^2))
 function scale(alphas, ts; active=nothing)
     if active==nothing
@@ -52,12 +54,13 @@ function scale(alphas, ts; active=nothing)
     end
     alphas_new
 end   
+
 function make_target(cpars, grid, alphas, l, vecs; active= nothing)
     nrms_vecs = sqrt.(grid.ws' * vecs.^2)
     function target(ts)
         alphas_new = scale(alphas, ts; active)
         cfn = get_coefs(cpars, grid, alphas_new, l, vecs)
-        pvecs = make_proj_vecs(cpars_ecp, grid_ecp, cfn, alphas_new, 0)
+        pvecs = make_proj_vecs(cpars, grid, cfn, alphas_new, l)
         nrms = sqrt.(grid.ws' *(pvecs.^2 .* grid.xs.^2))
         @views pvecs .= pvecs.*grid.xs .* vecs ./ nrms/nrms_vecs
        # nrm = 
@@ -65,4 +68,26 @@ function make_target(cpars, grid, alphas, l, vecs; active= nothing)
         #@show ress
         -sum(ress) 
     end
+end
+
+function one_exp_vec!(cpars, grid, vec, l)
+    nrm = dot(grid.ws, vec.^2)
+    @show nrm
+    if nrm.<eps(vec[1])
+        return (alpha= 0e0, err=-1)
+    end
+    rho2 = dot(grid.ws, grid.xs.^2 .* vec.^2)/nrm
+    @show rho2
+    #@views vec ./= sqrt(nrm)
+    Ia(α) = dot(grid.ws, grid.xs.^(2l+2) .*exp.(-α .* grid.xs.^2))
+    Iav(α) = dot(grid.ws, grid.xs.^(l+1) .*exp.(-α .* grid.xs.^2) .* vec)
+    function tgt(a)
+        an = 3/rho2/(2a[1]^2+1)
+        Iav(an)/Ia(2an)
+    end
+    sol = optimize(tgt, [1e0])
+    α = 3/rho2/(2Optim.minimizer(sol)[1]^2 + 1)
+    @views vec .-= grid.xs.^(l+1) .* exp.(-α .* grid.xs.^2) .* Iav(α)/Ia(2α)
+    α[1], 0
+end
 end
