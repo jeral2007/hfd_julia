@@ -1,6 +1,28 @@
 module MatUtils
 using LinearAlgebra
-export refine!, accelerate!
+export refine!, accelerate!, dashInds
+"""Auxilary function to make typing arrays of indexes easer.
+``dashInds(args...)`` returns ``res::Vector{Int64}``, that is constructed by following rules:
+if ``arg``  is an integer value, then ``arg`` is pushed to ``res``. 
+If ``arg`` is a collection  then members of ``arg`` appended to ``res``. Duplicated elements of ``res`` are deleted.
+
+EXAMPLES:
+dashInds(1, 2, 3) # [1, 2, 3]
+dashInds(1:3, 5, 7) # [1, 2, 3, 5, 7]
+"""
+function dashInds(args...)
+    res = Int64[]
+    for arg in args
+        if typeof(arg) <: Int
+            push!(res, arg)
+        else
+            append!(res, Vector(arg))
+        end
+    end
+    #@assert(length(unique(res)) == length(res))
+    unique(res)
+end
+
 function refine_iter!(A, B, y, u, r, mat;dump)
     u .= B * y
     r .= A * y

@@ -69,7 +69,7 @@ function dirac_h1!(cpars, grid, kappa, lhs, rhs)
     	rhs[kk,kk] = grid.xs[kk]
     	rhs[kk+N, kk+N] = an.^2 * grid.xs[kk]
     end
-    lhs .*= sc_fac
+    @views lhs .*= sc_fac
 end
 
 
@@ -122,7 +122,7 @@ function coul_pot(cpars::Params{T}, grid::Grid{T}, occ_block::ShellBlock{T}, kap
     @views for ii=1:length(occ_block.ks)
         nmax = 2abs(occ_block.ks[ii])
         γ = gam(cpars, occ_block.ks[ii])
-        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* nmax  .* grid.xs.^(2γ)
+        dens .+= (pqs[:, 1, ii].^2 + an^2 .* pqs[:, 2, ii].^2) .* occ_block.occs[ii]  .* grid.xs.^(2γ)
     end
     res2c = reshape(res, :, 2)
     @views res2c[:, 1] .= grid.xs .* (grid.pot * dens).*cpars.scale
@@ -295,7 +295,7 @@ Arguments:
 - res::Matrix -- at the end of exc_func! evaluation, exchange part
 corresponding to interaction with state pq 
 will be added to res"""
-function exc_func!(cpars, grid, k1, k2, pq, res)
+function exc_func!(cpars, grid, k1, k2, pq, occ, res)
     lj(κ) = abs(κ) - Int((-sign(κ)+1)/2), 2*abs(κ)-1
     l1, j1 = lj(k1)
     l2, j2 = lj(k2)
@@ -305,7 +305,7 @@ function exc_func!(cpars, grid, k1, k2, pq, res)
     kmin, kmax = abs(j1-j2), j1 + j2
     @inbounds for ii=1:cpars.N, jj=1:cpars.N
         nmax = 2abs(k2)
-        fact = nmax*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
+        fact = occ*grid.xs[ii]*cpars.scale*grid.xs[jj]^(gam1+gam2)
         fact *= grid.xs[ii]^(gam2-gam1)
         for kj=kmin:2:kmax
             pk = div(kj, 2)
@@ -328,7 +328,7 @@ function exc_pot!(cpars, grid, occ_block, kappa, res)
         f_inds = findall(k2 .== occ_block.ks)
         for fi in f_inds
             exc_func!(cpars, grid, kappa, k2, 
-                      occ_block.vecs[:, fi],  res)
+                      occ_block.vecs[:, fi], occ_block.occs[fi], res)
         end
     end
     res
@@ -352,7 +352,7 @@ function hfd_pot(cpars, grid, occ_block, kappa)
         if abs(2abs(occ_block.ks[ki])-occ_block.occs[ki])>eps(occ_block.occs[ki])
             n = occ_block.occs[ki]
             nmax = 2abs(kappa)
-            fact = -nmax*(1 - (n-1)/(nmax-1))
+            fact = -n*(1 - (n-1)/(nmax-1))
             make_correction!(cpars, grid, occ_block.vecs[:, ki], 
                 fact, kappa, res)
         end
