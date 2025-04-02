@@ -43,6 +43,15 @@ function make_proj_vecs(cpars, grid, cfn, alphas, l)
     end
     proj_vecs
 end
+function make_bas(cpars, grid, alphas, l, vecs)
+    cfn = get_coefs(cpars, grid, alphas, l, vecs)
+    pvecs = make_proj_vecs(cpars, grid, cfn, alphas, l)
+    overlaps = zeros(eltype(grid.xs), size(vecs, 2))
+    for kk in eachindex(overlaps)
+        overlaps[kk] = dot(grid.ws, pvecs[kk] .* vecs[kk])
+    end
+    (coefs = cfn.coefs, overlaps = overlap)
+end
 
 scale_all(alphas, ts) = 1/sqrt(2) .* alphas.*(1  .+ ts.^2 ./ (1e0.+ts.^2))
 function scale(alphas, ts; active=nothing)
@@ -54,18 +63,19 @@ function scale(alphas, ts; active=nothing)
     end
     alphas_new
 end   
+function ovlap(cpars, grid, alphas, cfn, l, vecs) 
+    pvecs = make_proj_vecs(cpars, grid, cfn, alphas, l)
+    nrms = sqrt.(grid.ws' *(pvecs.^2 .* grid.xs.^2))
+    @views pvecs .= pvecs.*grid.xs .* vecs ./ nrms
+    grid.ws' * pvecs
+end
 
 function make_target(cpars, grid, alphas, l, vecs; active= nothing)
     nrms_vecs = sqrt.(grid.ws' * vecs.^2)
     function target(ts)
         alphas_new = scale(alphas, ts; active)
         cfn = get_coefs(cpars, grid, alphas_new, l, vecs)
-        pvecs = make_proj_vecs(cpars, grid, cfn, alphas_new, l)
-        nrms = sqrt.(grid.ws' *(pvecs.^2 .* grid.xs.^2))
-        @views pvecs .= pvecs.*grid.xs .* vecs ./ nrms/nrms_vecs
-       # nrm = 
-        ress = grid.ws' * pvecs
-        #@show ress
+        ress = ovlap(cpars, grid, alphas_new, cfn, l, vecs) ./ nrms_vecs
         -sum(ress) 
     end
 end
